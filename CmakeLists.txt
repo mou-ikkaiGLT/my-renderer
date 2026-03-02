@@ -20,3 +20,19 @@ target_link_libraries(MyRenderer
     "-framework Cocoa"
     "-framework IOKit"
 )
+
+add_executable(MyRendererDirect
+    src/main_direct.c
+    glad/src/glad.c
+)
+
+target_include_directories(MyRendererDirect PRIVATE
+    glad/include
+)
+
+target_link_libraries(MyRendererDirect
+    glfw
+    "-framework OpenGL"
+    "-framework Cocoa"
+    "-framework IOKit"
+)

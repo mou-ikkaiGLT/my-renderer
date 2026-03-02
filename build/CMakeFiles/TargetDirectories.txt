@@ -1,3 +1,4 @@
 /Users/joegraham/Documents/GitHub/my-renderer/build/CMakeFiles/MyRenderer.dir
+/Users/joegraham/Documents/GitHub/my-renderer/build/CMakeFiles/MyRendererDirect.dir
 /Users/joegraham/Documents/GitHub/my-renderer/build/CMakeFiles/edit_cache.dir
 /Users/joegraham/Documents/GitHub/my-renderer/build/CMakeFiles/rebuild_cache.dir

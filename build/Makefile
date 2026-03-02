@@ -129,12 +129,26 @@ MyRenderer/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRenderer.dir/build.make CMakeFiles/MyRenderer.dir/build
 .PHONY : MyRenderer/fast
 
+#=============================================================================
+# Target rules for targets named MyRendererDirect
+
+# Build rule for target.
+MyRendererDirect: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 MyRendererDirect
+.PHONY : MyRendererDirect
+
+# fast build rule for target.
+MyRendererDirect/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/build
+.PHONY : MyRendererDirect/fast
+
 glad/src/glad.o: glad/src/glad.c.o
 .PHONY : glad/src/glad.o
 
 # target to build an object file
 glad/src/glad.c.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRenderer.dir/build.make CMakeFiles/MyRenderer.dir/glad/src/glad.c.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/glad/src/glad.c.o
 .PHONY : glad/src/glad.c.o
 
 glad/src/glad.i: glad/src/glad.c.i
@@ -143,6 +157,7 @@ glad/src/glad.i: glad/src/glad.c.i
 # target to preprocess a source file
 glad/src/glad.c.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRenderer.dir/build.make CMakeFiles/MyRenderer.dir/glad/src/glad.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/glad/src/glad.c.i
 .PHONY : glad/src/glad.c.i
 
 glad/src/glad.s: glad/src/glad.c.s
@@ -151,6 +166,7 @@ glad/src/glad.s: glad/src/glad.c.s
 # target to generate assembly for a file
 glad/src/glad.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRenderer.dir/build.make CMakeFiles/MyRenderer.dir/glad/src/glad.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/glad/src/glad.c.s
 .PHONY : glad/src/glad.c.s
 
 src/main.o: src/main.c.o
@@ -177,6 +193,30 @@ src/main.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRenderer.dir/build.make CMakeFiles/MyRenderer.dir/src/main.c.s
 .PHONY : src/main.c.s
 
+src/main_direct.o: src/main_direct.c.o
+.PHONY : src/main_direct.o
+
+# target to build an object file
+src/main_direct.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/src/main_direct.c.o
+.PHONY : src/main_direct.c.o
+
+src/main_direct.i: src/main_direct.c.i
+.PHONY : src/main_direct.i
+
+# target to preprocess a source file
+src/main_direct.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/src/main_direct.c.i
+.PHONY : src/main_direct.c.i
+
+src/main_direct.s: src/main_direct.c.s
+.PHONY : src/main_direct.s
+
+# target to generate assembly for a file
+src/main_direct.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/MyRendererDirect.dir/build.make CMakeFiles/MyRendererDirect.dir/src/main_direct.c.s
+.PHONY : src/main_direct.c.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -186,12 +226,16 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... MyRenderer"
+	@echo "... MyRendererDirect"
 	@echo "... glad/src/glad.o"
 	@echo "... glad/src/glad.i"
 	@echo "... glad/src/glad.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
+	@echo "... src/main_direct.o"
+	@echo "... src/main_direct.i"
+	@echo "... src/main_direct.s"
 .PHONY : help
 
 
