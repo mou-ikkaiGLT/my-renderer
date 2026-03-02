@@ -2,6 +2,10 @@
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <math.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <string.h>
 
 /* ── Matrix math ─────────────────────────────────────────────────────────────
    OpenGL uses column-major 4x4 matrices.
@@ -81,6 +85,57 @@ static void mat4_perspective(mat4 m, float fov, float aspect, float near_z, floa
     m[10] = (far_z + near_z) / (near_z - far_z);
     m[11] = -1.0f;
     m[14] = (2.0f * far_z * near_z) / (near_z - far_z);
+}
+
+/* ── Serial / IMU input ──────────────────────────────────────────────────────
+   Reads roll, pitch, yaw from the Arduino over USB serial.
+   Non-blocking — if no data is available the renderer keeps running normally.
+   Change SERIAL_PORT to match your Arduino's port if needed.
+────────────────────────────────────────────────────────────────────────────── */
+
+#define SERIAL_PORT      "/dev/cu.usbmodem101"
+#define ANGLE_THRESHOLD  30.0f   /* degrees — beyond this, IMU drives rotation */
+
+static int  serial_fd      = -1;
+static char serial_buf[128];
+static int  serial_buf_len = 0;
+
+static int serial_open(const char *port)
+{
+    int fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+    if (fd < 0) return -1;
+
+    struct termios tty;
+    memset(&tty, 0, sizeof(tty));
+    cfsetispeed(&tty, B115200);
+    cfsetospeed(&tty, B115200);
+    tty.c_cflag  = CS8 | CREAD | CLOCAL;
+    tty.c_iflag  = IGNPAR | IGNBRK;
+    tty.c_cc[VMIN]  = 0;
+    tty.c_cc[VTIME] = 0;
+    tcsetattr(fd, TCSANOW, &tty);
+    return fd;
+}
+
+/* Drains available bytes, returns 1 and fills r/p/y when a complete line
+   with three floats is parsed. Returns 0 if no new complete line yet. */
+static int serial_read_angles(float *r, float *p, float *y)
+{
+    if (serial_fd < 0) return 0;
+
+    char c;
+    int  got = 0;
+    while (read(serial_fd, &c, 1) == 1) {
+        if (c == '\n') {
+            serial_buf[serial_buf_len] = '\0';
+            if (sscanf(serial_buf, "%f,%f,%f", r, p, y) == 3)
+                got = 1;
+            serial_buf_len = 0;
+        } else if (c != '\r' && serial_buf_len < (int)sizeof(serial_buf) - 1) {
+            serial_buf[serial_buf_len++] = c;
+        }
+    }
+    return got;
 }
 
 /* ── Input state ─────────────────────────────────────────────────────────────
@@ -180,6 +235,29 @@ const char *fragmentShaderSource =
     "    FragColor = vec4(result, 1.0);\n"
     "}\0";
 
+/* ── Indicator shaders ───────────────────────────────────────────────────────
+   Simple 2D shaders for the input indicator overlay.
+   The vertex shader positions a unit quad (0–1 range) by scaling and
+   offsetting into NDC space. The fragment shader outputs a flat colour.
+────────────────────────────────────────────────────────────────────────────── */
+
+const char *indicatorVertSrc =
+    "#version 410 core\n"
+    "layout(location = 0) in vec2 aPos;\n"
+    "uniform vec2  uOffset;\n"
+    "uniform float uSize;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(aPos * uSize + uOffset, 0.0, 1.0);\n"
+    "}\0";
+
+const char *indicatorFragSrc =
+    "#version 410 core\n"
+    "out vec4 FragColor;\n"
+    "uniform vec3 uColor;\n"
+    "void main() {\n"
+    "    FragColor = vec4(uColor, 1.0);\n"
+    "}\0";
+
 unsigned int compile_shader(unsigned int type, const char *source)
 {
     unsigned int shader = glCreateShader(type);
@@ -228,7 +306,13 @@ int main(void)
     }
 
     printf("OpenGL version: %s\n", glGetString(GL_VERSION));
-    printf("Controls: WASD to rotate | click and drag to rotate\n");
+    printf("Controls: WASD/QE | mouse drag | IMU tilt >%.0f deg\n", ANGLE_THRESHOLD);
+
+    serial_fd = serial_open(SERIAL_PORT);
+    if (serial_fd < 0)
+        printf("IMU: not connected (serial port unavailable)\n");
+    else
+        printf("IMU: connected on %s\n", SERIAL_PORT);
 
     glEnable(GL_DEPTH_TEST);
 
@@ -297,6 +381,26 @@ int main(void)
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
+    /* ── Indicator VAO / VBO ───────────────────────────────────────────────────
+       A unit square from (0,0) to (1,1). The shader scales and offsets it
+       into NDC position each draw call.
+    ────────────────────────────────────────────────────────────────────────── */
+    float quad_verts[] = {
+        0.0f, 0.0f,   1.0f, 0.0f,   1.0f, 1.0f,
+        0.0f, 0.0f,   1.0f, 1.0f,   0.0f, 1.0f,
+    };
+
+    unsigned int indVAO, indVBO;
+    glGenVertexArrays(1, &indVAO);
+    glGenBuffers(1, &indVBO);
+    glBindVertexArray(indVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, indVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad_verts), quad_verts, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
     /* ── Build shader program ──────────────────────────────────────────────── */
     unsigned int vertexShader   = compile_shader(GL_VERTEX_SHADER,   vertexShaderSource);
     unsigned int fragmentShader = compile_shader(GL_FRAGMENT_SHADER, fragmentShaderSource);
@@ -317,6 +421,20 @@ int main(void)
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
+    /* ── Indicator shader program ──────────────────────────────────────────── */
+    unsigned int indVert   = compile_shader(GL_VERTEX_SHADER,   indicatorVertSrc);
+    unsigned int indFrag   = compile_shader(GL_FRAGMENT_SHADER, indicatorFragSrc);
+    unsigned int indProgram = glCreateProgram();
+    glAttachShader(indProgram, indVert);
+    glAttachShader(indProgram, indFrag);
+    glLinkProgram(indProgram);
+    glDeleteShader(indVert);
+    glDeleteShader(indFrag);
+
+    int uOffsetLoc = glGetUniformLocation(indProgram, "uOffset");
+    int uSizeLoc   = glGetUniformLocation(indProgram, "uSize");
+    int uColorLoc  = glGetUniformLocation(indProgram, "uColor");
+
     int modelLoc          = glGetUniformLocation(shaderProgram, "model");
     int viewLoc           = glGetUniformLocation(shaderProgram, "view");
     int projectionLoc     = glGetUniformLocation(shaderProgram, "projection");
@@ -333,10 +451,47 @@ int main(void)
     glUseProgram(shaderProgram);
     glUniform3f(cameraPosLoc, 0.0f, 0.0f, 2.5f);
 
+    /* ── Indicator layout ──────────────────────────────────────────────────────
+       6 squares arranged in a 2×3 grid in the bottom-left corner.
+       Each column is one direction (negative left, positive right).
+       Each row is one axis: top=yaw, middle=pitch, bottom=roll.
+
+         [yaw-]  [yaw+]    blue
+         [pitch-][pitch+]  green
+         [roll-] [roll+]   orange
+    ────────────────────────────────────────────────────────────────────────── */
+    #define IND_SIZE  0.055f
+    #define IND_GAP   0.012f
+    #define IND_X0   -0.97f
+    #define IND_Y0   -0.97f
+
+    /* x, y (NDC bottom-left corner), r, g, b (active colour) */
+    float ind_pos[6][2] = {
+        { IND_X0,              IND_Y0 + 2*(IND_SIZE+IND_GAP) }, /* yaw-   */
+        { IND_X0+IND_SIZE+IND_GAP, IND_Y0 + 2*(IND_SIZE+IND_GAP) }, /* yaw+   */
+        { IND_X0,              IND_Y0 +   (IND_SIZE+IND_GAP) }, /* pitch- */
+        { IND_X0+IND_SIZE+IND_GAP, IND_Y0 +   (IND_SIZE+IND_GAP) }, /* pitch+ */
+        { IND_X0,              IND_Y0                         }, /* roll-  */
+        { IND_X0+IND_SIZE+IND_GAP, IND_Y0                         }, /* roll+  */
+    };
+    float ind_col[6][3] = {
+        {0.3f, 0.5f, 1.0f}, {0.3f, 0.5f, 1.0f},  /* yaw   — blue   */
+        {0.3f, 1.0f, 0.4f}, {0.3f, 1.0f, 0.4f},  /* pitch — green  */
+        {1.0f, 0.55f,0.2f}, {1.0f, 0.55f,0.2f},  /* roll  — orange */
+    };
+    float dim_col[3] = {0.15f, 0.15f, 0.15f};
+
+    /* ── IMU state ─────────────────────────────────────────────────────────── */
+    float imu_roll = 0.0f, imu_pitch = 0.0f, imu_yaw = 0.0f;
+    float imu_yaw_offset = 0.0f;
+    float last_raw_yaw   = 0.0f;   /* most recent raw yaw for re-zeroing on reset */
+    int   yaw_zeroed = 0;
+
     /* ── Render loop ───────────────────────────────────────────────────────── */
     float last_time    = (float)glfwGetTime();
     int   lighting_on  = 1;
     int   l_key_prev   = GLFW_RELEASE;
+    int   r_key_prev   = GLFW_RELEASE;
 
     while (!glfwWindowShouldClose(window)) {
         /* Delta time — keeps rotation speed consistent regardless of frame rate */
@@ -357,23 +512,43 @@ int main(void)
         }
         l_key_prev = l_key_curr;
 
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            yaw -= KEY_ROTATION_SPEED * dt;
+        /* R — reset pyramid orientation and re-zero IMU yaw to current heading */
+        int r_key_curr = glfwGetKey(window, GLFW_KEY_R);
+        if (r_key_curr == GLFW_PRESS && r_key_prev == GLFW_RELEASE) {
+            yaw   = 0.0f;
+            pitch = 0.0f;
+            roll  = 0.0f;
+            imu_yaw_offset = last_raw_yaw;  /* wherever the board points now = new zero */
+            imu_yaw        = 0.0f;
+        }
+        r_key_prev = r_key_curr;
 
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            yaw += KEY_ROTATION_SPEED * dt;
+        /* ── IMU: update latest angles, zero yaw on first reading ────────── */
+        float raw_r, raw_p, raw_y;
+        if (serial_read_angles(&raw_r, &raw_p, &raw_y)) {
+            if (!yaw_zeroed) { imu_yaw_offset = raw_y; yaw_zeroed = 1; }
+            imu_roll     = raw_r;
+            imu_pitch    = raw_p;
+            imu_yaw      = raw_y - imu_yaw_offset;
+            last_raw_yaw = raw_y;
+        }
 
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            pitch -= KEY_ROTATION_SPEED * dt;
+        /* ── Unified input flags — keyboard OR IMU both set the same flag ── */
+        int act[6] = {
+            (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) || (imu_roll  < -ANGLE_THRESHOLD), /* yaw-   */
+            (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) || (imu_roll  >  ANGLE_THRESHOLD), /* yaw+   */
+            (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) || (imu_pitch < -ANGLE_THRESHOLD), /* pitch- */
+            (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) || (imu_pitch >  ANGLE_THRESHOLD), /* pitch+ */
+            (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) || (imu_yaw   < -ANGLE_THRESHOLD), /* roll-  */
+            (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) || (imu_yaw   >  ANGLE_THRESHOLD), /* roll+  */
+        };
 
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            pitch += KEY_ROTATION_SPEED * dt;
-
-        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-            roll -= KEY_ROTATION_SPEED * dt;
-
-        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-            roll += KEY_ROTATION_SPEED * dt;
+        if (act[0]) yaw   -= KEY_ROTATION_SPEED * dt;
+        if (act[1]) yaw   += KEY_ROTATION_SPEED * dt;
+        if (act[2]) pitch -= KEY_ROTATION_SPEED * dt;
+        if (act[3]) pitch += KEY_ROTATION_SPEED * dt;
+        if (act[4]) roll  -= KEY_ROTATION_SPEED * dt;
+        if (act[5]) roll  += KEY_ROTATION_SPEED * dt;
 
         /* ── Build model matrix ────────────────────────────────────────────────
            Apply pitch (X rotation) first, then yaw (Y rotation) on top.
@@ -399,6 +574,30 @@ int main(void)
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, 18);
 
+        /* ── Draw input indicators ─────────────────────────────────────────────
+           Drawn in screen space on top of the scene (depth test off).
+           Layout (bottom-left corner):
+             row 2: [yaw-] [yaw+]    blue
+             row 1: [pitch-][pitch+]  green
+             row 0: [roll-] [roll+]   orange
+        ────────────────────────────────────────────────────────────────────── */
+        glDisable(GL_DEPTH_TEST);
+        glUseProgram(indProgram);
+        glBindVertexArray(indVAO);
+        glUniform1f(uSizeLoc, IND_SIZE);
+
+        for (int i = 0; i < 6; i++) {
+            glUniform2f(uOffsetLoc, ind_pos[i][0], ind_pos[i][1]);
+            if (act[i])
+                glUniform3f(uColorLoc, ind_col[i][0], ind_col[i][1], ind_col[i][2]);
+            else
+                glUniform3fv(uColorLoc, 1, dim_col);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+
+        glBindVertexArray(0);
+        glEnable(GL_DEPTH_TEST);
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -407,6 +606,11 @@ int main(void)
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteProgram(shaderProgram);
+    glDeleteVertexArrays(1, &indVAO);
+    glDeleteBuffers(1, &indVBO);
+    glDeleteProgram(indProgram);
+
+    if (serial_fd >= 0) close(serial_fd);
 
     glfwTerminate();
     return 0;

@@ -6,7 +6,7 @@ C_DEFINES =
 
 C_INCLUDES = -I/Users/joegraham/Documents/GitHub/my-renderer/glad/include -isystem /opt/homebrew/include
 
-C_FLAGSarm64 = -std=gnu11 -arch arm64
+C_FLAGSarm64 = -O3 -DNDEBUG -std=gnu11 -arch arm64
 
-C_FLAGS = -std=gnu11 -arch arm64
+C_FLAGS = -O3 -DNDEBUG -std=gnu11 -arch arm64
 
