@@ -6,6 +6,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* ── Matrix math ─────────────────────────────────────────────────────────────
    OpenGL uses column-major 4x4 matrices.
@@ -86,28 +87,19 @@ static void mat4_perspective(mat4 m, float fov, float aspect, float near_z, floa
    Non-blocking — if no data is available the renderer keeps running normally.
 ────────────────────────────────────────────────────────────────────────────── */
 
-#define SERIAL_PORT  "/dev/cu.usbmodem101"
+#define SERIAL_PORT  "/tmp/imu_pipe"
 #define DEG_TO_RAD   0.01745329251994f
-#define SMOOTH_TAU   0.08f   /* smoothing time constant in seconds — increase for more lag */
+#define SMOOTH_TAU       0.08f   /* smoothing time constant in seconds — increase for more lag */
 
 static int  serial_fd      = -1;
 static char serial_buf[128];
 static int  serial_buf_len = 0;
 
-static int serial_open(const char *port)
+static int serial_open(const char *path)
 {
-    int fd = open(port, O_RDONLY | O_NOCTTY | O_NONBLOCK);
-    if (fd < 0) return -1;
-
-    struct termios tty;
-    memset(&tty, 0, sizeof(tty));
-    cfsetispeed(&tty, B115200);
-    cfsetospeed(&tty, B115200);
-    tty.c_cflag  = CS8 | CREAD | CLOCAL;
-    tty.c_iflag  = IGNPAR | IGNBRK;
-    tty.c_cc[VMIN]  = 0;
-    tty.c_cc[VTIME] = 0;
-    tcsetattr(fd, TCSANOW, &tty);
+    /* Create the named pipe if it doesn't exist yet */
+    mkfifo(path, 0666);
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
     return fd;
 }
 
@@ -273,9 +265,9 @@ int main(void)
 
     serial_fd = serial_open(SERIAL_PORT);
     if (serial_fd < 0)
-        printf("IMU: not connected — mouse drag active\n");
+        printf("Pipe: failed to open %s — mouse drag active\n", SERIAL_PORT);
     else
-        printf("IMU: connected on %s (direct angle mode)\n", SERIAL_PORT);
+        printf("Pipe: listening on %s (start ble_relay.py to stream)\n", SERIAL_PORT);
 
     glEnable(GL_DEPTH_TEST);
 
